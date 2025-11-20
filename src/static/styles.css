@@ -717,7 +717,7 @@ footer {
 }
 
 .calendar-header {
-  background-color: var(--primary);
+  background-color: var(--secondary);
   color: white;
   padding: 12px 8px;
   text-align: center;
@@ -726,7 +726,7 @@ footer {
 }
 
 .calendar-header.time-column {
-  background-color: var(--primary-dark);
+  background-color: var(--secondary-dark);
 }
 
 .time-slot {
