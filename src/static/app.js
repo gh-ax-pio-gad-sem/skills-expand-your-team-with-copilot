@@ -1,6 +1,9 @@
 document.addEventListener("DOMContentLoaded", () => {
   // DOM elements
   const activitiesList = document.getElementById("activities-list");
+  const calendarView = document.getElementById("calendar-view");
+  const cardViewBtn = document.getElementById("card-view-btn");
+  const calendarViewBtn = document.getElementById("calendar-view-btn");
   const messageDiv = document.getElementById("message");
   const registrationModal = document.getElementById("registration-modal");
   const modalActivityName = document.getElementById("modal-activity-name");
@@ -40,6 +43,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let searchQuery = "";
   let currentDay = "";
   let currentTimeRange = "";
+  let currentView = "card"; // "card" or "calendar"
 
   // Authentication state
   let currentUser = null;
@@ -411,6 +415,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Function to display filtered activities
   function displayFilteredActivities() {
+    if (currentView === "calendar") {
+      // Re-render calendar view with filters
+      renderCalendarView();
+      return;
+    }
+    
     // Clear the activities list
     activitiesList.innerHTML = "";
 
@@ -860,6 +870,218 @@ document.addEventListener("DOMContentLoaded", () => {
     setDayFilter,
     setTimeRangeFilter,
   };
+
+  // View toggle functionality
+  function switchView(view) {
+    currentView = view;
+    
+    if (view === "card") {
+      cardViewBtn.classList.add("active");
+      calendarViewBtn.classList.remove("active");
+      activitiesList.classList.remove("hidden");
+      calendarView.classList.add("hidden");
+    } else {
+      cardViewBtn.classList.remove("active");
+      calendarViewBtn.classList.add("active");
+      activitiesList.classList.add("hidden");
+      calendarView.classList.remove("hidden");
+      renderCalendarView();
+    }
+  }
+
+  // Add event listeners for view toggle
+  cardViewBtn.addEventListener("click", () => switchView("card"));
+  calendarViewBtn.addEventListener("click", () => switchView("calendar"));
+
+  // Render calendar view
+  function renderCalendarView() {
+    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const hours = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]; // 6 AM to 8 PM
+    
+    // Create calendar grid
+    let calendarHTML = '<div class="calendar-grid">';
+    
+    // Header row
+    calendarHTML += '<div class="calendar-header time-column">Time</div>';
+    days.forEach(day => {
+      calendarHTML += `<div class="calendar-header">${day}</div>`;
+    });
+    
+    // Time slots and cells
+    hours.forEach(hour => {
+      const timeLabel = formatHourLabel(hour);
+      calendarHTML += `<div class="time-slot">${timeLabel}</div>`;
+      
+      // Create cells for each day
+      days.forEach(day => {
+        const cellId = `cell-${day}-${hour}`;
+        calendarHTML += `<div class="calendar-cell" id="${cellId}" data-day="${day}" data-hour="${hour}"></div>`;
+      });
+    });
+    
+    calendarHTML += '</div>';
+    calendarView.innerHTML = calendarHTML;
+    
+    // Place activities in the calendar
+    placeActivitiesInCalendar();
+  }
+
+  // Format hour for display (24h to 12h AM/PM)
+  function formatHourLabel(hour) {
+    const period = hour >= 12 ? "PM" : "AM";
+    const displayHour = hour % 12 || 12;
+    return `${displayHour}:00 ${period}`;
+  }
+
+  // Place activities in the calendar based on their schedule
+  function placeActivitiesInCalendar() {
+    // Apply the same filters as card view
+    let filteredActivities = {};
+    
+    Object.entries(allActivities).forEach(([name, details]) => {
+      const activityType = getActivityType(name, details.description);
+      
+      // Apply category filter
+      if (currentFilter !== "all" && activityType !== currentFilter) {
+        return;
+      }
+      
+      // Apply weekend filter if selected
+      if (currentTimeRange === "weekend" && details.schedule_details) {
+        const activityDays = details.schedule_details.days;
+        const isWeekendActivity = activityDays.some((day) =>
+          timeRanges.weekend.days.includes(day)
+        );
+        
+        if (!isWeekendActivity) {
+          return;
+        }
+      }
+      
+      // Apply search filter
+      const searchableContent = [
+        name.toLowerCase(),
+        details.description.toLowerCase(),
+        formatSchedule(details).toLowerCase(),
+      ].join(" ");
+      
+      if (
+        searchQuery &&
+        !searchableContent.includes(searchQuery.toLowerCase())
+      ) {
+        return;
+      }
+      
+      // Activity passed all filters, add to filtered list
+      filteredActivities[name] = details;
+    });
+    
+    // Track overlaps for each cell
+    const cellActivities = {};
+    
+    // Place each activity in the appropriate cells
+    Object.entries(filteredActivities).forEach(([name, details]) => {
+      if (!details.schedule_details) return;
+      
+      const { days, start_time, end_time } = details.schedule_details;
+      const [startHour, startMinute] = start_time.split(":").map(Number);
+      const [endHour, endMinute] = end_time.split(":").map(Number);
+      
+      days.forEach(day => {
+        // Calculate which hour slots this activity spans
+        for (let hour = startHour; hour < endHour || (hour === endHour && endMinute > 0); hour++) {
+          const cellId = `cell-${day}-${hour}`;
+          const cell = document.getElementById(cellId);
+          
+          if (cell) {
+            if (!cellActivities[cellId]) {
+              cellActivities[cellId] = [];
+            }
+            
+            // Calculate position within the hour
+            let topPercent = 0;
+            let heightPercent = 100;
+            
+            if (hour === startHour) {
+              topPercent = (startMinute / 60) * 100;
+            }
+            
+            if (hour === endHour - 1 || (hour === endHour && endMinute > 0)) {
+              if (hour === startHour) {
+                heightPercent = ((endMinute - startMinute) / 60) * 100;
+              } else {
+                heightPercent = (endMinute / 60) * 100;
+              }
+            } else if (hour === startHour) {
+              heightPercent = ((60 - startMinute) / 60) * 100;
+            }
+            
+            cellActivities[cellId].push({
+              name,
+              details,
+              topPercent,
+              heightPercent
+            });
+          }
+        }
+      });
+    });
+    
+    // Render activities in cells
+    Object.entries(cellActivities).forEach(([cellId, activities]) => {
+      const cell = document.getElementById(cellId);
+      if (!cell) return;
+      
+      const hasOverlap = activities.length > 1;
+      
+      activities.forEach((activity, index) => {
+        const activityElement = createCalendarActivityElement(
+          activity.name,
+          activity.details,
+          activity.topPercent,
+          activity.heightPercent,
+          hasOverlap,
+          index
+        );
+        cell.appendChild(activityElement);
+      });
+    });
+  }
+
+  // Create calendar activity element
+  function createCalendarActivityElement(name, details, topPercent, heightPercent, hasOverlap, overlapIndex) {
+    const div = document.createElement("div");
+    div.className = "calendar-activity";
+    if (hasOverlap) {
+      div.classList.add("overlapping");
+    }
+    
+    const totalSpots = details.max_participants;
+    const takenSpots = details.participants.length;
+    const spotsLeft = totalSpots - takenSpots;
+    
+    // Position the activity
+    div.style.top = `${topPercent}%`;
+    div.style.height = `${heightPercent}%`;
+    
+    // Determine activity type for coloring
+    const activityType = getActivityType(name, details.description);
+    const typeInfo = activityTypes[activityType];
+    div.style.backgroundColor = typeInfo.textColor;
+    
+    div.innerHTML = `
+      <span class="calendar-activity-name">${name}</span>
+      <span class="calendar-activity-enrollment">${takenSpots}/${totalSpots} enrolled</span>
+      <div class="activity-tooltip">
+        <div class="activity-tooltip-title">${name}</div>
+        <div class="activity-tooltip-description">${details.description}</div>
+        <div class="activity-tooltip-schedule"><strong>Schedule:</strong> ${formatSchedule(details)}</div>
+        <div class="activity-tooltip-capacity"><strong>Capacity:</strong> ${takenSpots}/${totalSpots} (${spotsLeft} spots left)</div>
+      </div>
+    `;
+    
+    return div;
+  }
 
   // Initialize app
   checkAuthentication();
